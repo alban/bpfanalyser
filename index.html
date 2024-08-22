@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File Analyser</title>
+
+    <script src="wasm_exec.js" defer></script>
+    <script src="wasm.js" defer></script>
+</head>
+
+<body>
+    <input type="file" id="fileInput">
+    <button onclick="readFile()" id="runButton" disabled>Read File</button>
+    <hr/>
+    <div id="result">Loading WASM program...</div>
+</body>
+</html>
