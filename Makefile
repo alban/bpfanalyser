@@ -15,4 +15,4 @@ run:
 
 .PHONY: clean
 clean:
-	rm -f wasm.wasm wasm_exec.js
+	rm -f wasm.wasm
