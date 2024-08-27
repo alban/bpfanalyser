@@ -17,7 +17,6 @@ package main
 import (
 	"archive/tar"
 	"bytes"
-	"debug/elf"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -93,64 +92,47 @@ func update() {
 	js.Global().Get("document").Call("getElementById", "result").Set("value", "WASM: update()")
 }
 
-func parseELF(elfReader *bytes.Reader) {
-	file, err := elf.NewFile(elfReader)
-	if err != nil {
-		log("failed to parse ELF file: %v", err)
-		return
-	}
-	defer file.Close()
+func parseBPF(tree *Node, code_out *string, fileName string, reader *bytes.Reader) {
+	*code_out += fmt.Sprintf("// File: %s\n\n", fileName)
 
-	log("Programs:\n")
-	for _, sec := range file.Sections {
-		if sec.Type == elf.SHT_PROGBITS && (sec.Flags&elf.SHF_EXECINSTR) != 0 && sec.Size > 0 {
-			log("Name: %s\n", sec.Name)
-		}
-	}
-	log("Maps:\n")
-	for _, sec := range file.Sections {
-		if sec.Name == ".maps" || strings.HasPrefix(sec.Name, "maps") {
-			log("Name: %s\n", sec.Name)
-		}
-	}
-}
-
-func parseBPF(tree *Node, fileName string, reader *bytes.Reader) {
 	spec, err := ebpf.LoadCollectionSpecFromReader(reader)
 	if err != nil {
 		log("failed to load collection spec: %v", err)
 		return
 	}
-	for name, prog := range spec.Programs {
-		AppendNode(tree, fmt.Sprintf("%s/Programs", fileName), &Node{
-			ID:   name,
-			Text: name,
-			Icon: "fa fa-gear",
-		})
-		AppendNode(tree, fmt.Sprintf("%s/Programs/%s", fileName, name), &Node{
-			ID:   "type",
-			Text: "type=" + prog.Type.String(),
-			Icon: "fa fa-tag",
-		})
-	}
+
 	for name, m := range spec.Maps {
 		AppendNode(tree, fmt.Sprintf("%s/Maps", fileName), &Node{
 			ID:   name,
-			Text: name,
+			Text: fmt.Sprintf("%s (%s)", name, m.Type.String()),
 			Icon: "fa fa-database",
 		})
-		AppendNode(tree, fmt.Sprintf("%s/Maps/%s", fileName, name), &Node{
-			ID:   "type",
-			Text: "type=" + m.Type.String(),
-			Icon: "fa fa-tag",
+
+		*code_out += fmt.Sprintf(`struct {
+        __uint(type, %s);
+        __uint(max_entries, %d);
+        __uint(key_size, %d);
+        __uint(value_size, %d);
+} %s SEC(".maps");
+
+`,
+			m.Type.String(), m.MaxEntries, m.KeySize, m.ValueSize, name)
+	}
+
+	for name, prog := range spec.Programs {
+		AppendNode(tree, fmt.Sprintf("%s/Programs", fileName), &Node{
+			ID:   name,
+			Text: fmt.Sprintf("%s %s", prog.Type.String(), name),
+			Icon: "fa fa-gear",
 		})
 
-		log("KeySize: %d\n", m.KeySize)
-		log("ValueSize: %d\n", m.ValueSize)
-		log("MaxEntries: %d\n", m.MaxEntries)
+		*code_out += fmt.Sprintf(`// SEC("%s")
+// %s %s
+`,
+			prog.SectionName, prog.Type.String(), name)
+
+		*code_out += fmt.Sprintf("%v\n", prog.Instructions)
 	}
-	out := `[{"text": "New Root 1", "icon": "fa fa-folder"}]`
-	js.Global().Set("tree_out", out)
 }
 
 func isElf(data []byte) bool {
@@ -170,7 +152,7 @@ func isTar(data []byte) bool {
 	return string(tarExpectedMagic) == string(tarActualMagic)
 }
 
-func parseTar(tree *Node, reader io.Reader) error {
+func parseTar(tree *Node, code_out *string, reader io.Reader) error {
 	tarReader := tar.NewReader(reader)
 
 	for {
@@ -193,8 +175,7 @@ func parseTar(tree *Node, reader io.Reader) error {
 			if isElf(b) {
 				log("ELF file: %s", header.Name)
 
-				parseELF(bytes.NewReader(b))
-				parseBPF(tree, header.Name, bytes.NewReader(b))
+				parseBPF(tree, code_out, header.Name, bytes.NewReader(b))
 			} else {
 				dirName := filepath.Dir(header.Name)
 				baseName := filepath.Base(header.Name)
@@ -213,9 +194,13 @@ func parseTar(tree *Node, reader io.Reader) error {
 
 //export readFile
 func readFile(ptr *uint8, length int) int {
+	var code_out string
+
+	fileName := js.Global().Get("uploadedFileName").String()
+
 	tree := &Node{
 		ID:       "root",
-		Text:     js.Global().Get("uploadedFileName").String(),
+		Text:     fileName,
 		Icon:     "fa fa-box",
 		Children: []*Node{},
 	}
@@ -231,12 +216,11 @@ func readFile(ptr *uint8, length int) int {
 
 	if isElf(data) {
 		log("ELF file detected")
-		parseELF(bytes.NewReader(data))
-		parseBPF(tree, "file", bytes.NewReader(data))
+		parseBPF(tree, &code_out, fileName, bytes.NewReader(data))
 	} else if isTar(data) {
 		log("TAR file detected")
 		tarReader := bytes.NewReader(data)
-		err := parseTar(tree, tarReader)
+		err := parseTar(tree, &code_out, tarReader)
 		if err != nil {
 			log(err.Error())
 		}
@@ -251,6 +235,8 @@ func readFile(ptr *uint8, length int) int {
 		return 1
 	}
 	js.Global().Set("tree_out", string(out))
+
+	js.Global().Set("code_out", code_out)
 
 	return 0
 }

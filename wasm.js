@@ -15,7 +15,6 @@ function init() {
       }
     })
       .bind("refresh.jstree", function(event, data) {
-          console.log("refresh ready");
           $(this).jstree("open_all");
       });
 
@@ -56,18 +55,27 @@ async function readFile() {
 	    const ptr = wasm.exports.malloc(fileData.length);
 	    const buf = new Uint8Array(wasm.exports.memory.buffer, ptr, fileData.length);
 	    buf.set(fileData);
-	
-        const result = wasm.exports.readFile(ptr, fileData.length);
+
+        try {
+            const result = wasm.exports.readFile(ptr, fileData.length);
+        } catch (e) {
+            console.error(e);
+            document.getElementById('progress').textContent = `Error: ${e}`;
+            return;
+        }
         wasm.exports.free(ptr);
 
-        console.log(window.tree_out);
         var newTreeData = JSON.parse(window.tree_out);
-        console.log(newTreeData);
 
         // Replace the existing tree with the new tree data
         $('#gadget_jstree').jstree(true).settings.core.data = newTreeData;
         $('#gadget_jstree').jstree('open_all');
         $('#gadget_jstree').jstree(true).refresh();
+
+        var gadgetCode = document.getElementById('gadget_code')
+        gadgetCode.textContent = window.code_out
+        gadgetCode.removeAttribute('data-highlighted');
+        hljs.highlightElement(gadgetCode);
 
         document.getElementById('progress').textContent = `Done`;
     };

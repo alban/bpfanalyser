@@ -6,6 +6,7 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.2.1/jstree.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
     <script src="wasm_exec.js" defer></script>
     <script src="wasm.js" defer></script>
@@ -13,8 +14,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.2.1/themes/default/style.min.css" />
     <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
-
-
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
 </head>
 
 <body>
@@ -32,10 +32,14 @@
     <div id="tabs">
         <ul>
             <li><a href="#tabs-overview">Overview</a></li>
+            <li><a href="#tabs-code">Code</a></li>
             <li><a href="#tabs-logs">Logs</a></li>
         </ul>
         <div id="tabs-overview">
             <div id="gadget_jstree"></div>
+        </div>
+        <div id="tabs-code">
+            <pre><code id="gadget_code">// BPF code here</code></pre>
         </div>
         <div id="tabs-logs">
             <div id="result">Loading WASM program...</div>
@@ -48,6 +52,7 @@
             $("#tabs").tabs();
         });
     </script>
+
     </div>
 </div>
 </body>
