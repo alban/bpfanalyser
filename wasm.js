@@ -77,6 +77,11 @@ async function readFile() {
         gadgetCode.removeAttribute('data-highlighted');
         hljs.highlightElement(gadgetCode);
 
+        const gadgetGraph = document.getElementById('gadget_graph');
+        const gadgetGraphChild = document.createElement('gadget_graph_child');
+        const { svg } = await mermaid.render('gadget_graph_child', window.graph_out);
+        gadgetGraph.innerHTML = svg;
+
         document.getElementById('progress').textContent = `Done`;
     };
 

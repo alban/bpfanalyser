@@ -92,7 +92,7 @@ func update() {
 	js.Global().Get("document").Call("getElementById", "result").Set("value", "WASM: update()")
 }
 
-func parseBPF(tree *Node, code_out *string, fileName string, reader *bytes.Reader) {
+func parseBPF(tree *Node, code_out, graph_out *string, fileName string, reader *bytes.Reader) {
 	*code_out += fmt.Sprintf("// File: %s\n\n", fileName)
 
 	spec, err := ebpf.LoadCollectionSpecFromReader(reader)
@@ -117,6 +117,8 @@ func parseBPF(tree *Node, code_out *string, fileName string, reader *bytes.Reade
 
 `,
 			m.Type.String(), m.MaxEntries, m.KeySize, m.ValueSize, name)
+
+		*graph_out += fmt.Sprintf("%s_%s(\"%s\")\n", fileName, m.Name, m.Name)
 	}
 
 	for name, prog := range spec.Programs {
@@ -132,6 +134,17 @@ func parseBPF(tree *Node, code_out *string, fileName string, reader *bytes.Reade
 			prog.SectionName, prog.Type.String(), name)
 
 		*code_out += fmt.Sprintf("%v\n", prog.Instructions)
+
+		references := make(map[string]bool)
+		for _, ins := range prog.Instructions {
+			if ref := ins.Reference(); ref != "" {
+				references[ref] = true
+			}
+		}
+		for ref, _ := range references {
+			*graph_out += fmt.Sprintf("%s_%s -- \"%s\" --> %s_%s\n", fileName, prog.Name, "uses", fileName, ref)
+		}
+		*graph_out += fmt.Sprintf("%s_%s[\"%s\"]\n", fileName, prog.Name, prog.Name)
 	}
 }
 
@@ -152,7 +165,7 @@ func isTar(data []byte) bool {
 	return string(tarExpectedMagic) == string(tarActualMagic)
 }
 
-func parseTar(tree *Node, code_out *string, reader io.Reader) error {
+func parseTar(tree *Node, code_out, graphOut *string, reader io.Reader) error {
 	tarReader := tar.NewReader(reader)
 
 	for {
@@ -175,7 +188,7 @@ func parseTar(tree *Node, code_out *string, reader io.Reader) error {
 			if isElf(b) {
 				log("ELF file: %s", header.Name)
 
-				parseBPF(tree, code_out, header.Name, bytes.NewReader(b))
+				parseBPF(tree, code_out, graphOut, header.Name, bytes.NewReader(b))
 			} else {
 				dirName := filepath.Dir(header.Name)
 				baseName := filepath.Base(header.Name)
@@ -195,6 +208,7 @@ func parseTar(tree *Node, code_out *string, reader io.Reader) error {
 //export readFile
 func readFile(ptr *uint8, length int) int {
 	var code_out string
+	graph_out := "flowchart TD\n"
 
 	fileName := js.Global().Get("uploadedFileName").String()
 
@@ -216,11 +230,11 @@ func readFile(ptr *uint8, length int) int {
 
 	if isElf(data) {
 		log("ELF file detected")
-		parseBPF(tree, &code_out, fileName, bytes.NewReader(data))
+		parseBPF(tree, &code_out, &graph_out, fileName, bytes.NewReader(data))
 	} else if isTar(data) {
 		log("TAR file detected")
 		tarReader := bytes.NewReader(data)
-		err := parseTar(tree, &code_out, tarReader)
+		err := parseTar(tree, &code_out, &graph_out, tarReader)
 		if err != nil {
 			log(err.Error())
 		}
@@ -237,6 +251,8 @@ func readFile(ptr *uint8, length int) int {
 	js.Global().Set("tree_out", string(out))
 
 	js.Global().Set("code_out", code_out)
+
+	js.Global().Set("graph_out", graph_out)
 
 	return 0
 }
