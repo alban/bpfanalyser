@@ -73,7 +73,7 @@ async function readFile() {
 
             switch (entry.type) {
                 case 'source':
-                    newTab.innerHTML = '<pre><code id="tabCode'+num_tabs+'"></code></pre>;'
+                    newTab.innerHTML = '<pre><code id="tabCode'+num_tabs+'"></code></pre>';
                     const codeElement = document.getElementById('tabCode'+num_tabs);
                     if ("jsonPretty" in entry) {
                         codeElement.textContent = JSON.stringify(JSON.parse(entry.data), null, 2);
