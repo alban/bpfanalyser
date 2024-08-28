@@ -5,19 +5,6 @@ const WASM_URL = 'wasm.wasm';
 var wasm;
 
 function init() {
-  $('#gadget_jstree').jstree({
-      core: {
-          data: []
-      },
-      plugins: ["themes", "icons", "state"],
-      state: {
-          max_opened: -1 // Set to -1 for unlimited opened nodes
-      }
-    })
-      .bind("refresh.jstree", function(event, data) {
-          $(this).jstree("open_all");
-      });
-
   const go = new Go();
   if ('instantiateStreaming' in WebAssembly) {
     WebAssembly.instantiateStreaming(fetch(WASM_URL), go.importObject).then(function (obj) {
@@ -57,7 +44,7 @@ async function readFile() {
 	    buf.set(fileData);
 
         try {
-            const result = wasm.exports.readFile(ptr, fileData.length);
+            wasm.exports.readFile(ptr, fileData.length);
         } catch (e) {
             console.error(e);
             document.getElementById('progress').textContent = `Error: ${e}`;
@@ -65,22 +52,79 @@ async function readFile() {
         }
         wasm.exports.free(ptr);
 
-        var newTreeData = JSON.parse(window.tree_out);
+        for (let key in window.gadgetResults) {
+            const entry = window.gadgetResults[key];
 
-        // Replace the existing tree with the new tree data
-        $('#gadget_jstree').jstree(true).settings.core.data = newTreeData;
-        $('#gadget_jstree').jstree('open_all');
-        $('#gadget_jstree').jstree(true).refresh();
+            var num_tabs = $("div#tabs ul li").length + 1;
+            const newTabHTML = "<li><a href='#tab-dyn" + num_tabs + "'>" + entry.title + "</a></li>"
 
-        var gadgetCode = document.getElementById('gadget_code')
-        gadgetCode.textContent = window.code_out
-        gadgetCode.removeAttribute('data-highlighted');
-        hljs.highlightElement(gadgetCode);
+            if ($('#tabMarker' + entry.position).length > 0) {
+                var placeholder = $('#tabMarker' + entry.position);
+                placeholder.before(newTabHTML);
+            } else {
+                var placeholder = $("div#tabs ul")
+                placeholder.append(newTabHTML);
+            }
+            $("div#tabs").append(
+                "<div id='tab-dyn" + num_tabs + "'>" + entry.title + "</div>"
+            );
+            $("div#tabs").tabs("refresh");
+            const newTab = document.getElementById('tab-dyn'+ num_tabs);
 
-        const gadgetGraph = document.getElementById('gadget_graph');
-        const gadgetGraphChild = document.createElement('gadget_graph_child');
-        const { svg } = await mermaid.render('gadget_graph_child', window.graph_out);
-        gadgetGraph.innerHTML = svg;
+            switch (entry.type) {
+                case 'source':
+                    newTab.innerHTML = '<pre><code id="tabCode'+num_tabs+'"></code></pre>;'
+                    const codeElement = document.getElementById('tabCode'+num_tabs);
+                    if ("jsonPretty" in entry) {
+                        codeElement.textContent = JSON.stringify(JSON.parse(entry.data), null, 2);
+                    } else {
+                        codeElement.textContent = entry.data;
+                    }
+                    codeElement.removeAttribute('data-highlighted');
+                    hljs.highlightElement(codeElement);
+                    break;
+
+                case 'tree':
+                    newTab.innerHTML = '<div id="tabTree'+num_tabs+'"></div>'
+                    var treeElement = document.getElementById('emptyDiv').cloneNode(true);
+                    treeElement.id = 'tabTree'+num_tabs;
+                    newTab.appendChild(treeElement);
+                    // Add jQuery attributes
+                    treeElement = $('#'+treeElement.id)
+                    var newTreeData = JSON.parse(entry.data);
+                    treeElement.jstree({
+                        core: {
+                            data: []
+                        },
+                        plugins: ["themes", "icons", "state"],
+                        state: {
+                            max_opened: -1 // Set to -1 for unlimited opened nodes
+                        }
+                    });
+                    treeElement.bind("refresh.jstree", function(event, data) {
+                            $(this).jstree("open_all");
+                        });
+
+                    treeElement.jstree(true).settings.core.data = newTreeData;
+                    treeElement.jstree('open_all');
+                    treeElement.jstree(true).refresh();
+
+                    break;
+
+                case 'mermaid':
+                    newTab.innerHTML = '<div id="tabMermaid'+num_tabs+'"></div>'
+                    const mermaidElement = $('#tabMermaid'+num_tabs)
+                    const gadgetGraphChild = document.createElement('div');
+                    gadgetGraphChild.id = 'tabMermaid'+num_tabs+'Child';
+                    const { svg } = await mermaid.render(gadgetGraphChild.id, entry.data);
+                    newTab.innerHTML = svg;
+
+                    break;
+
+                default:
+                    console.log("Unknown entry type: " + entry.type)
+            }
+        }
 
         document.getElementById('progress').textContent = `Done`;
     };
