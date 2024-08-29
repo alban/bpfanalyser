@@ -113,11 +113,22 @@ async function readFile() {
 
                 case 'mermaid':
                     newTab.innerHTML = '<div id="tabMermaid'+num_tabs+'"></div>'
+                    //newTab.innerHTML = '<div><div id="tabMermaid'+num_tabs+'"></div></div><div><pre><code id="tabCode'+num_tabs+'"></code></pre></div>'
                     const mermaidElement = $('#tabMermaid'+num_tabs)
                     const gadgetGraphChild = document.createElement('div');
                     gadgetGraphChild.id = 'tabMermaid'+num_tabs+'Child';
                     const { svg } = await mermaid.render(gadgetGraphChild.id, entry.data);
                     newTab.innerHTML = svg;
+                    //$('#tabMermaid'+num_tabs)
+
+                    /*
+                    const mermaidCodeElement = document.getElementById('tabCode'+num_tabs);
+                    console.log(mermaidCodeElement)
+                    console.log(entry.data)
+                    mermaidCodeElement.textContent = entry.data;
+                    mermaidCodeElement.removeAttribute('data-highlighted');
+                    hljs.highlightElement(mermaidCodeElement);
+                    */
 
                     break;
 

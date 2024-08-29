@@ -22,11 +22,13 @@ import (
 	"html"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall/js"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
 )
 
 type Node struct {
@@ -110,7 +112,7 @@ func TitleFromFileName(fileName string) string {
 
 func parseBPF(tree *Node, fileName string, reader *bytes.Reader, results map[string]interface{}) {
 	code := fmt.Sprintf("// File: %s\n\n", fileName)
-	graph := "flowchart TD\n"
+	graph := "flowchart LR\n"
 
 	spec, err := ebpf.LoadCollectionSpecFromReader(reader)
 	if err != nil {
@@ -118,10 +120,29 @@ func parseBPF(tree *Node, fileName string, reader *bytes.Reader, results map[str
 		return
 	}
 
-	for name, m := range spec.Maps {
+	var mapsList []*ebpf.MapSpec
+	for _, m := range spec.Maps {
+		if m.Name == ".rodata" || m.Name == ".bss" {
+			continue
+		}
+		mapsList = append(mapsList, m)
+	}
+	sort.Slice(mapsList, func(i, j int) bool {
+		return mapsList[i].Name < mapsList[j].Name
+	})
+
+	var progsList []*ebpf.ProgramSpec
+	for _, p := range spec.Programs {
+		progsList = append(progsList, p)
+	}
+	sort.Slice(progsList, func(i, j int) bool {
+		return progsList[i].Name < progsList[j].Name
+	})
+
+	for _, m := range mapsList {
 		AppendNode(tree, fmt.Sprintf("%s/Maps", fileName), &Node{
-			ID:   name,
-			Text: fmt.Sprintf("%s (%s)", name, m.Type.String()),
+			ID:   m.Name,
+			Text: fmt.Sprintf("%s (%s)", m.Name, m.Type.String()),
 			Icon: "fa fa-database",
 		})
 
@@ -133,33 +154,81 @@ func parseBPF(tree *Node, fileName string, reader *bytes.Reader, results map[str
 } %s SEC(".maps");
 
 `,
-			m.Type.String(), m.MaxEntries, m.KeySize, m.ValueSize, name)
+			m.Type.String(), m.MaxEntries, m.KeySize, m.ValueSize, m.Name)
 
-		graph += fmt.Sprintf("%s(\"%s\")\n", m.Name, m.Name)
+		graph += fmt.Sprintf("%s[(\"%s\")]\n", m.Name, m.Name)
 	}
 
-	for name, prog := range spec.Programs {
+	for _, prog := range progsList {
 		AppendNode(tree, fmt.Sprintf("%s/Programs", fileName), &Node{
-			ID:   name,
-			Text: fmt.Sprintf("%s %s", prog.Type.String(), name),
+			ID:   prog.Name,
+			Text: fmt.Sprintf("%s %s", prog.Type.String(), prog.Name),
 			Icon: "fa fa-gear",
 		})
 
 		code += fmt.Sprintf(`// SEC("%s")
 // %s %s
 `,
-			prog.SectionName, prog.Type.String(), name)
+			prog.SectionName, prog.Type.String(), prog.Name)
 
 		code += fmt.Sprintf("%v\n", prog.Instructions)
 
 		references := make(map[string]bool)
+		previousRef := map[asm.Register]string{}
 		for _, ins := range prog.Instructions {
+			if ins.IsBuiltinCall() {
+				builtinFunc := asm.BuiltinFunc(ins.Constant)
+				builtinFuncName := fmt.Sprint(builtinFunc)
+				ref := ""
+				if strings.HasPrefix(builtinFuncName, "FnMap") &&
+					strings.HasSuffix(builtinFuncName, "Elem") {
+					builtinFuncName = strings.TrimPrefix(builtinFuncName, "FnMap")
+					builtinFuncName = strings.TrimSuffix(builtinFuncName, "Elem")
+					ref, _ = previousRef[asm.R1]
+				} else if builtinFuncName == "FnPerfEventOutput" {
+					builtinFuncName = strings.TrimPrefix(builtinFuncName, "FnPerf")
+					ref, _ = previousRef[asm.R2]
+				}
+				if ref != "" {
+					references[ref+"\000"+builtinFuncName] = true
+				}
+			}
 			if ref := ins.Reference(); ref != "" {
-				references[ref] = true
+				previousRef[ins.Dst] = ref
 			}
 		}
-		for ref, _ := range references {
-			graph += fmt.Sprintf("%s -- \"%s\" --> %s\n", prog.Name, "uses", ref)
+		possibleVerbs := []string{
+			"Lookup",
+			"Update",
+			"Delete",
+		}
+
+		referencesList := []string{}
+		for ref := range references {
+			referencesList = append(referencesList, ref)
+		}
+		sort.Strings(referencesList)
+		for _, ref := range referencesList {
+			if !references[ref] {
+				continue
+			}
+			parts := strings.SplitN(ref, "\000", 2)
+			fnName := parts[1]
+			mapName := parts[0]
+			// If several arrows exist, merge them
+			verbs := []string{}
+			for _, verb := range possibleVerbs {
+				if references[mapName+"\000"+verb] {
+					verbs = append(verbs, verb)
+				}
+			}
+			if len(verbs) > 1 {
+				for _, verb := range verbs {
+					references[mapName+"\000"+verb] = false
+				}
+				fnName = strings.Join(verbs, "+")
+			}
+			graph += fmt.Sprintf("%s -- \"%s\" --> %s\n", prog.Name, fnName, mapName)
 		}
 		graph += fmt.Sprintf("%s[\"%s\"]\n", prog.Name, prog.Name)
 	}
